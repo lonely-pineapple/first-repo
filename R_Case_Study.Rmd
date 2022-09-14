@@ -1,0 +1,571 @@
+---
+title: "R_Case_Study"
+author: "Hadrien"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, cache=TRUE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries used
+
+```{r library, cache=TRUE}
+library(tidyverse)
+library(readxl)
+library(qpcR)
+library(fastDummies)
+library(janitor)
+library(kableExtra)
+library(GGally)
+library(huxtable)
+```
+
+## Exploring the data
+
+#Import the data
+
+We start by importing into R the price data from the Excel file by fetching it from the second tab of the spreadsheet.
+
+```{r reading_data, cache=TRUE}
+#read the data from the Excel file
+insurance_data <- read_excel("C:/Users/Hadrien Pistre/OneDrive - Pearson Ham Consulting Ltd/Desktop/R Case Study/Brief for Interview_Analyst.xlsx", sheet = 2)
+
+#replace wrong colnammes with the right colnames that are on the data set's first row
+colnames(insurance_data) <- insurance_data[1,]
+
+#delete the first row which is now a duplicate of the colnames
+insurance_data <- insurance_data[-1,]
+```
+
+#Format the data
+
+We then examine the types of data we imported. 
+- This data contains only 3 rows containing NAs out of more than 20K rows: we thus decide to delete those rows since their explanatory power is negligible given their small number. 
+- Variables containing numbers are stored as characters on the original data file. We decide to convert those variables to numeric variables.
+- To be able to analyze categorical variables, we decide to create N-1 dummies for each of those variables.
+- Finally, after a qualitative examination, we conclude than only variables 7 to 9 may be colinear. We create a colinear matrix using ggpairs and determine that variables 8 and 9 are colinear; we hence decide to remove variable 9 from our dataset.
+
+```{r exploring_data, cache=TRUE, echo=FALSE}
+
+#examine the types of data
+types_of_data <- str(insurance_data)
+
+#count the number of nas
+na_count <- data.frame(colSums(is.na(insurance_data)))
+na_count
+
+#only three nas for 20K rows => we can omit the nas
+insurance_data <- na.omit(insurance_data)
+
+#clean col names with only lower case letters and _
+insurance_data <- clean_names(insurance_data)
+
+#examine unique values per column to see which one should be dummied
+unique_list <- function(x){
+unique(insurance_data[,x])
+}
+
+un1 <- unique_list(1)
+un2 <- unique_list(2)
+un3 <- unique_list(3)
+un4 <- unique_list(4)
+un5 <- unique_list(5)
+un6 <- unique_list(6)
+un7 <- unique_list(7)
+un8 <- unique_list(8)
+un9 <- unique_list(9)
+un10 <- unique_list(10)
+un11 <- unique_list(11)
+un12 <- unique_list(12)
+un13 <- unique_list(13)
+un14 <- unique_list(14)
+
+#create a dataframe to examine the unique values of the columns we will need to dummy
+qpcR:::cbind.na(un1,un3,un7,un8,un14)
+
+#dummy the relevant columns (the "renewed" column is already binary and is therefore not included)
+insurance_data_dummied <- dummy_cols(insurance_data, select_columns = c('marital_status','gender','payment_method','acquisition_channel'))
+
+#clean the names of the dummy variables
+insurance_data_dummied <- clean_names(insurance_data_dummied)
+
+#remove the non-dummied variables and the colinear dummy variables (we create n-1 dummies for each variable we need to dummy)
+insurance_data_dummied_short <- insurance_data_dummied [,-c(1,3,7,8,19,20,24,28)]
+
+#convert character variables to numeric variables
+numerize_data <- function(x){
+as.numeric(unlist(insurance_data_dummied_short[,x]))
+}
+
+for(i in 1:20){
+insurance_data_dummied_short[,i] <- numerize_data(i)
+}
+
+#check that variables are now numeric
+types_of_data_2 <- str(insurance_data_dummied_short) 
+
+#examine colinearity for the change in price variables (the others have no reason to be colinear since they are fundamentally different)
+ggpairs(insurance_data_dummied_short, columns=c(7:9))
+
+#"percent_change_in_price_vs_last_year" and "grouped_change_in_price" are the same => we get rid of the second one
+insurance_data_dummied_short <- insurance_data_dummied_short[,-9]
+```
+##
+
+##Analyse the factors that drive price
+
+#Vizualise the data
+
+We want to visualize the individual impact of each variable on price. We first plot the distribution of all non-dummy variables to examine if they contain outliers that could make our data visualization less relevant.
+
+```{r examine distribution, cache=TRUE}
+
+#create histograms of each non-dummy variable
+
+#price
+ggplot(insurance_data_dummied_short, aes(x=price))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Price",y="Count",title="Price distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#age
+ggplot(insurance_data_dummied_short, aes(x=age))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Age",y="Count",title="Age distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#car value
+ggplot(insurance_data_dummied_short, aes(x=car_value))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Car value",y="Count",title="Car value distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#years of no claim bonus
+ggplot(insurance_data_dummied_short, aes(x=years_of_no_claims_bonus))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Years of no claim bonus",y="Count",title="Years of no claim bonus distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#annual mileage
+ggplot(insurance_data_dummied_short, aes(x=annual_mileage))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Annual mileage",y="Count",title="Annual mileage distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#year of tenure with current provider
+ggplot(insurance_data_dummied_short, aes(x=years_of_tenure_with_current_provider))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Years of tenure with current provider",y="Count",title="Years of tenure with current provider distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#actual change in price vs. last year
+ggplot(insurance_data_dummied_short, aes(x=actual_change_in_price_vs_last_year))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Actual change in price vs. last year",y="Count",title="Actual change in price vs. last year distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#percent change in price vs last year
+ggplot(insurance_data_dummied_short, aes(x=percent_change_in_price_vs_last_year))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Percent change in price vs. last year",y="Count",title="Percent change in price vs. last year distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+We notice that the variables "Car value", "Annual mileage distribution", "Actual change in price vs. last year" and "Percent change in price vs. last year" contain significant outliers. We get rid of the last percentile of the first two variables and of the first and last percentiles of the last two variables to vizualise them properly. We notice that this greatly improve the visualization of their distribution.
+```{r delete outliers and reeaxmine distribution, cache=TRUE}
+
+#get rid of the extreme percentiles to improve our data visualization
+insurance_data_dummied_short_no_outliers <- subset(insurance_data_dummied_short, 
+                                                   car_value < quantile(car_value, 0.99)
+                                                   & annual_mileage < quantile(annual_mileage, 0.99)
+                                                   & actual_change_in_price_vs_last_year < quantile(actual_change_in_price_vs_last_year, 0.99)
+                                                   & actual_change_in_price_vs_last_year > quantile(actual_change_in_price_vs_last_year, 0.01)
+                                                   & percent_change_in_price_vs_last_year < quantile(percent_change_in_price_vs_last_year, 0.99)
+                                                   & percent_change_in_price_vs_last_year > quantile(percent_change_in_price_vs_last_year, 0.01))
+
+#create histograms of each non-dummy variable to re-examine them
+
+#price
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=price))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Price",y="Count",title="Price distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#age
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=age))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Age",y="Count",title="Age distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#car value
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=car_value))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Car value",y="Count",title="Car value distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#years of no claim bonus
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=years_of_no_claims_bonus))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Years of no claim bonus",y="Count",title="Years of no claim bonus distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#annual mileage
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=annual_mileage))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Annual mileage",y="Count",title="Annual mileage distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#years of tenure with current provider
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=years_of_tenure_with_current_provider))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Years of tenure with current provider",y="Count",title="Years of tenure with current provider distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#actual change in price vs. last year
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=actual_change_in_price_vs_last_year))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Actual change in price vs. last year",y="Count",title="Actual change in price vs. last year distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#percent change in price vs. last year
+ggplot(insurance_data_dummied_short_no_outliers, aes(x=percent_change_in_price_vs_last_year))+
+  geom_histogram(color="black", fill="white")+
+  theme_bw()+
+  labs(x="Percent change in price vs. last year",y="Count",title="Percent change in price vs. last year distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+Now that outliers have been removed, we can visualize the individual impact of each non-dummy variable on price.
+
+```{r examine impact of each variable on price, cache=TRUE}
+
+#create scatter plots using ggplot and add a trend line to examine the impact of each variable on price
+
+#price vs age
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=age))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Age",x="Age",y="Price")
+
+#price vs car value
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=car_value))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Car value",x="Car value",y="Price")
+
+#price vs years of no claim bonus
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=years_of_no_claims_bonus))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Years of no claims bonus",x="Years of no claims bonus",y="Price")
+
+#price vs annual mileage
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=annual_mileage))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Annual mileage",x="Annual mileage",y="Price")
+
+#price vs years of tenure with current provider
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=years_of_tenure_with_current_provider))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Years of tenure with current provider",x="Years of tenure with current provider",y="Price")
+
+#price vs actual change in price vs last year
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=actual_change_in_price_vs_last_year))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Actual change in price vs. last year",x="Actual change in price vs last year",y="Price")
+
+#price vs percent change in price vs last year
+ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=percent_change_in_price_vs_last_year))+
+  geom_point()+
+  geom_smooth(color="red")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(title="Price vs. Percent change in price vs. last year",x="Percent change in price vs. last year",y="Price")
+```
+
+##Analyse the data and create linear regression models to predict the price
+
+#Create the models
+
+Thanks to our data visualization above, we notice that the actual change in price vs last year has a negative impact of price when it is negative, and a positive impact on price when it is positive. This means that creating two linear regression models - one used when the actual change in price vs last year is negative, and one when it is positive - could yield a better result than create one linear regression model without any discrimination.
+
+To examine if we can obtain better results using two models rather than one, we first create a linear regression model using all the statistically significant variables at a 95% confidence interval (=> with a t-stat greater than 1.96). Note: we get rid of the non statistically significant variables 
+```{r linear regression model, cache=TRUE}
+
+#let us create a linear regression model for price using all non-dummy variables
+lin_reg_full <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  annual_mileage+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  gender_m+
+                  payment_method_annual+
+                  acquisition_channel_aggreg+
+                  acquisition_channel_direct+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short)
+summary(lin_reg_full)
+
+#we remove one by one variables with absolute t-values <2 starting with the smallest: acquisition_channel_direct, gender_m, annual_mileage and acquisition_channel_aggreg
+lin_reg_sig <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+
+                  marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short)
+summary(lin_reg_sig)
+```
+
+Then, we create two sub data sets from our data set: one contains data points for which the actual change in price is strictly negative, the other contains the data points for which the actual change in price is positive.
+```{r linear regression model based on change in actual price vs last year, cache=TRUE}
+#keep only rows for which actual change in price is negative
+insurance_data_dummied_short_neg_act_change_price <- subset(insurance_data_dummied_short, actual_change_in_price_vs_last_year < 0)
+
+#create a linear regression based on this subset - we only keep statistically significant variables as done previously
+lin_reg_neg_act_change_price <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_direct,
+                data = insurance_data_dummied_short_neg_act_change_price)
+summary(lin_reg_neg_act_change_price)
+
+#keep only rows for which actual change in price is positive
+insurance_data_dummied_short_pos_act_change_price <- subset(insurance_data_dummied_short, actual_change_in_price_vs_last_year >= 0)
+
+#create a linear regression based on this subset - we only keep statistically significant variables as done previously
+lin_reg_pos_act_change_price <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short_pos_act_change_price)
+summary(lin_reg_pos_act_change_price)
+```
+We can see that we obtain adjusted R-squared of 0.3266 and 0.3566 for respectively the "negative change in actual price" and the "positive change in actual price" datasets, compared to an adjusted R-squared of 0.3101 for the model for which we do no discrimination regarding the change in actual price vs last year.
+
+#Backtest the models
+
+We now want to back test our models to see if disriminating based on the change in actual price indeed yields better results. We train our models on a random sample of 60% of the data, and test it on the remaining 40%.
+
+```{r back testing of the linear regression model, cache=TRUE}
+
+#define the sample size
+smp_size <- floor(0.6 * nrow(insurance_data_dummied_short))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(insurance_data_dummied_short)), size = smp_size)
+
+#breakdown our data in a training and a testing sets
+insurance_data_dummied_short_train <- insurance_data_dummied_short[train_ind, ]
+insurance_data_dummied_short_test <- insurance_data_dummied_short[-train_ind, ]
+
+#train our model
+lin_reg_sig_trained <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+
+                  marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short_train)
+summary(lin_reg_sig_trained)
+
+#test our model
+lin_reg_sig_tested_data <- data.frame(predict(lin_reg_sig_trained, newdata = insurance_data_dummied_short_test))
+lin_reg_sig_tested_vs_reality <- cbind(lin_reg_sig_tested_data,insurance_data_dummied_short_test$price)
+colnames(lin_reg_sig_tested_vs_reality) <- c("predicted","reality")
+
+#compute the mean squared error and the mean absolute error
+lin_reg_sig_tested_vs_reality$squared_error <- (lin_reg_sig_tested_vs_reality$predicted - lin_reg_sig_tested_vs_reality$reality)^2
+lin_reg_sig_tested_vs_reality$absolute_error <- abs((lin_reg_sig_tested_vs_reality$predicted - lin_reg_sig_tested_vs_reality$reality))
+mse_lin_reg_sig = mean(lin_reg_sig_tested_vs_reality$squared_error)
+mae_lin_reg_sig = mean(lin_reg_sig_tested_vs_reality$absolute_error)
+mse_lin_reg_sig
+mae_lin_reg_sig
+```
+
+
+
+```{r backtesting of the "positive" linear regression model, CACHE=TRUE}
+
+#define the sample size
+smp_size_2 <- floor(0.6 * nrow(insurance_data_dummied_short_neg_act_change_price))
+set.seed(456)
+train_ind_neg <- sample(seq_len(nrow(insurance_data_dummied_short_neg_act_change_price)), size = smp_size_2)
+
+#breakdown our data in a training and a testing sets
+insurance_data_dummied_short_neg_train <- insurance_data_dummied_short_neg_act_change_price[train_ind_neg, ]
+insurance_data_dummied_short_neg_test <- insurance_data_dummied_short_neg_act_change_price[-train_ind_neg, ]
+
+#train our model
+lin_reg_sig_neg_trained <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+
+                  marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short_neg_train)
+summary(lin_reg_sig_neg_trained)
+
+#test our model
+lin_reg_sig_tested_neg_data <- data.frame(predict(lin_reg_sig_neg_trained, newdata = insurance_data_dummied_short_neg_test))
+lin_reg_sig_tested_neg_vs_reality <- cbind(lin_reg_sig_tested_neg_data,insurance_data_dummied_short_neg_test$price)
+colnames(lin_reg_sig_tested_neg_vs_reality) <- c("predicted","reality")
+
+#compute the mean squared error and the mean absolute error
+lin_reg_sig_tested_neg_vs_reality$squared_error <- (lin_reg_sig_tested_neg_vs_reality$predicted - lin_reg_sig_tested_neg_vs_reality$reality)^2
+lin_reg_sig_tested_neg_vs_reality$absolute_error <- abs(lin_reg_sig_tested_neg_vs_reality$predicted - lin_reg_sig_tested_neg_vs_reality$reality)
+mse_lin_reg_neg_sig = mean(lin_reg_sig_tested_neg_vs_reality$squared_error)
+mae_lin_reg_neg_sig = mean(lin_reg_sig_tested_neg_vs_reality$absolute_error)
+mse_lin_reg_neg_sig
+mae_lin_reg_neg_sig
+```
+
+```{r backtesting of the "negative" linear regression model, CACHE=TRUE}
+
+#define the sample size
+smp_size_3 <- floor(0.6 * nrow(insurance_data_dummied_short_pos_act_change_price))
+set.seed(789)
+train_ind_pos <- sample(seq_len(nrow(insurance_data_dummied_short_pos_act_change_price)), size = smp_size_3)
+
+#breakdown our data in a training and a testing sets
+insurance_data_dummied_short_pos_train <- insurance_data_dummied_short_pos_act_change_price[train_ind_pos, ]
+insurance_data_dummied_short_pos_test <- insurance_data_dummied_short_pos_act_change_price[-train_ind_pos, ]
+
+#train our model
+lin_reg_sig_pos_trained <- lm(price ~ 
+                  age+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  renewed+
+                  marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  payment_method_annual+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short_pos_train)
+summary(lin_reg_sig_pos_trained)
+
+#test our model
+lin_reg_sig_tested_pos_data <- data.frame(predict(lin_reg_sig_pos_trained, newdata = insurance_data_dummied_short_pos_test))
+lin_reg_sig_tested_pos_vs_reality <- cbind(lin_reg_sig_tested_pos_data,insurance_data_dummied_short_pos_test$price)
+colnames(lin_reg_sig_tested_pos_vs_reality) <- c("predicted","reality")
+lin_reg_sig_tested_pos_vs_reality$squared_error <- (lin_reg_sig_tested_pos_vs_reality$predicted - lin_reg_sig_tested_pos_vs_reality$reality)^2
+lin_reg_sig_tested_pos_vs_reality$absolute_error <- abs(lin_reg_sig_tested_pos_vs_reality$predicted - lin_reg_sig_tested_pos_vs_reality$reality)
+
+#compute the mean squared error and the mean absolute error
+mse_lin_reg_pos_sig = mean(lin_reg_sig_tested_pos_vs_reality$squared_error)
+mae_lin_reg_pos_sig = mean(lin_reg_sig_tested_pos_vs_reality$absolute_error)
+mse_lin_reg_pos_sig
+mae_lin_reg_pos_sig
+```
+```{r}
+huxreg(lin_reg_sig, lin_reg_neg_act_change_price, lin_reg_pos_act_change_price, lin_reg_sig_trained, lin_reg_sig_neg_trained, lin_reg_sig_pos_trained)
+
+vector_1 <- c("MSE","MAE","MAE","MSE","MAE","MSE")
+vector_2 <- c("Linear","Linear","Neg change","Neg change","Pos change","Pos change")
+
+mse_mae_comparables <- data.frame(cbind(mse_lin_reg_sig, mae_lin_reg_sig, mse_lin_reg_neg_sig, mae_lin_reg_neg_sig, mse_lin_reg_pos_sig, mae_lin_reg_pos_sig))
+
+mse_mae_comparables <- t(mse_mae_comparables)
+
+mse_mae_comparables <- cbind(mse_mae_comparables,vector_1,vector_2)
+
+rownames(mse_mae_comparables) <- c(1,2,3,4,5,6)
+colnames(mse_mae_comparables) <- c(1,2,3)
+
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
