@@ -9,9 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Libraries used
+*Libraries used*
 
-```{r library, cache=TRUE}
+```{r library, cache=TRUE, results='hide'}
 library(tidyverse)
 library(readxl)
 library(qpcR)
@@ -20,17 +20,19 @@ library(janitor)
 library(kableExtra)
 library(GGally)
 library(huxtable)
+library(plotROC)
+library(cutpointr)
 ```
 
-## Exploring the data
+# 1. Exploring the data
 
-#Import the data
+## 1.1. Import the data
 
 We start by importing into R the price data from the Excel file by fetching it from the second tab of the spreadsheet.
 
 ```{r reading_data, cache=TRUE}
 #read the data from the Excel file
-insurance_data <- read_excel("C:/Users/Hadrien Pistre/OneDrive - Pearson Ham Consulting Ltd/Desktop/R Case Study/Brief for Interview_Analyst.xlsx", sheet = 2)
+insurance_data <- read_excel("C:/Users/Hadrien Pistre/OneDrive - Pearson Ham Consulting Ltd/Desktop/R Folder/PH_training/Brief for Interview_Analyst.xlsx", sheet = 2)
 
 #replace wrong colnammes with the right colnames that are on the data set's first row
 colnames(insurance_data) <- insurance_data[1,]
@@ -39,13 +41,13 @@ colnames(insurance_data) <- insurance_data[1,]
 insurance_data <- insurance_data[-1,]
 ```
 
-#Format the data
+## 1.2. Format the data
 
 We then examine the types of data we imported. 
-- This data contains only 3 rows containing NAs out of more than 20K rows: we thus decide to delete those rows since their explanatory power is negligible given their small number. 
-- Variables containing numbers are stored as characters on the original data file. We decide to convert those variables to numeric variables.
-- To be able to analyze categorical variables, we decide to create N-1 dummies for each of those variables.
-- Finally, after a qualitative examination, we conclude than only variables 7 to 9 may be colinear. We create a colinear matrix using ggpairs and determine that variables 8 and 9 are colinear; we hence decide to remove variable 9 from our dataset.
++ This data contains only 3 rows containing NAs out of more than 20K rows: we thus decide to delete those rows since their explanatory power is negligible given their small number. 
++ Variables containing numbers are stored as characters on the original data file. We decide to convert those variables to numeric variables.
++ To be able to analyze categorical variables, we decide to create N-1 dummies for each of those variables.
++ Finally, after a qualitative examination, we conclude than only variables 7 to 9 may be colinear. We create a colinear matrix using ggpairs and determine that variables 8 and 9 are colinear; we hence decide to remove variable 9 from our dataset.
 
 ```{r exploring_data, cache=TRUE, echo=FALSE}
 
@@ -54,6 +56,9 @@ types_of_data <- str(insurance_data)
 
 #count the number of nas
 na_count <- data.frame(colSums(is.na(insurance_data)))
+variable_names <- data.frame(rownames(na_count))
+na_count <- cbind(variable_names,na_count)
+colnames(na_count) <- c("Variable","Number of NAs")
 na_count
 
 #only three nas for 20K rows => we can omit the nas
@@ -67,6 +72,7 @@ unique_list <- function(x){
 unique(insurance_data[,x])
 }
 
+for(i in 1:14){}
 un1 <- unique_list(1)
 un2 <- unique_list(2)
 un3 <- unique_list(3)
@@ -112,11 +118,12 @@ ggpairs(insurance_data_dummied_short, columns=c(7:9))
 #"percent_change_in_price_vs_last_year" and "grouped_change_in_price" are the same => we get rid of the second one
 insurance_data_dummied_short <- insurance_data_dummied_short[,-9]
 ```
-##
 
-##Analyse the factors that drive price
+# 2. Analyse the factors that drive price
 
-#Vizualise the data
+## 2.1. Vizualise the data
+
+### 2.1.1. Examine distributions
 
 We want to visualize the individual impact of each variable on price. We first plot the distribution of all non-dummy variables to examine if they contain outliers that could make our data visualization less relevant.
 
@@ -181,7 +188,10 @@ ggplot(insurance_data_dummied_short, aes(x=percent_change_in_price_vs_last_year)
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
+### 2.1.2. Examine distributions without outliers
+
 We notice that the variables "Car value", "Annual mileage distribution", "Actual change in price vs. last year" and "Percent change in price vs. last year" contain significant outliers. We get rid of the last percentile of the first two variables and of the first and last percentiles of the last two variables to vizualise them properly. We notice that this greatly improve the visualization of their distribution.
+
 ```{r delete outliers and reeaxmine distribution, cache=TRUE}
 
 #get rid of the extreme percentiles to improve our data visualization
@@ -251,6 +261,9 @@ ggplot(insurance_data_dummied_short_no_outliers, aes(x=percent_change_in_price_v
   labs(x="Percent change in price vs. last year",y="Count",title="Percent change in price vs. last year distribution")+
   theme(plot.title = element_text(hjust = 0.5))
 ```
+
+### 2.1.3. Vizualise the individual effect of each variable on price
+
 Now that outliers have been removed, we can visualize the individual impact of each non-dummy variable on price.
 
 ```{r examine impact of each variable on price, cache=TRUE}
@@ -314,13 +327,20 @@ ggplot(insurance_data_dummied_short_no_outliers, aes(y=price,x=percent_change_in
   labs(title="Price vs. Percent change in price vs. last year",x="Percent change in price vs. last year",y="Price")
 ```
 
-##Analyse the data and create linear regression models to predict the price
+## 2.2. Analyse the data and create linear regression models to predict the price
 
-#Create the models
+### 2.2.1. Create the models
 
-Thanks to our data visualization above, we notice that the actual change in price vs last year has a negative impact of price when it is negative, and a positive impact on price when it is positive. This means that creating two linear regression models - one used when the actual change in price vs last year is negative, and one when it is positive - could yield a better result than create one linear regression model without any discrimination.
+Thanks to our data visualization above, we notice that an increase in the annual change in price vs last year has a negative impact on price when it is negative, and a positive impact on price when it is positive. This means that creating two linear regression models - one used when the actual change in price vs last year is negative, and one when it is positive - could yield a better result than create one linear regression model without any discrimination.
 
-To examine if we can obtain better results using two models rather than one, we first create a linear regression model using all the statistically significant variables at a 95% confidence interval (=> with a t-stat greater than 1.96). Note: we get rid of the non statistically significant variables 
+The effects of the other variables on price seem linear, therefore it is unlikely that further subsetting our data based on the other variables would improve the predictive power of our model.
+
+To examine if we can obtain better results using two models rather than one, we first create a linear regression model using all the statistically significant variables at a **95%** confidence interval (=> with a t-stat greater than **1.96**). 
+
+#### Linear regression
+
+*Note: we get rid of the non statistically significant variables*
+
 ```{r linear regression model, cache=TRUE}
 
 #let us create a linear regression model for price using all non-dummy variables
@@ -332,7 +352,8 @@ lin_reg_full <- lm(price ~
                   years_of_tenure_with_current_provider+
                   actual_change_in_price_vs_last_year+
                   percent_change_in_price_vs_last_year+
-                  renewed+marital_status_d+
+                  renewed+
+                  marital_status_d+
                   marital_status_m+
                   marital_status_s+
                   marital_status_v+
@@ -365,55 +386,50 @@ lin_reg_sig <- lm(price ~
 summary(lin_reg_sig)
 ```
 
-Then, we create two sub data sets from our data set: one contains data points for which the actual change in price is strictly negative, the other contains the data points for which the actual change in price is positive.
-```{r linear regression model based on change in actual price vs last year, cache=TRUE}
-#keep only rows for which actual change in price is negative
-insurance_data_dummied_short_neg_act_change_price <- subset(insurance_data_dummied_short, actual_change_in_price_vs_last_year < 0)
+#### Linear regression with interaction terms
 
-#create a linear regression based on this subset - we only keep statistically significant variables as done previously
-lin_reg_neg_act_change_price <- lm(price ~ 
+We now create a linear regression with interaction terms that account for the sign (<0 or >0) of the actual change in price vs. last year by creeating two columns.
+
+```{r linear regression model with actual change in price sign discrimination, cache=TRUE}
+
+#create a column which takes the value of the actual change in price if this change is positive, and zero otherwise
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_pos <- insurance_data_dummied_short$actual_change_in_price_vs_last_year
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_pos[insurance_data_dummied_short$actual_change_in_price_vs_last_year_pos<0] <- "0"
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_pos <- as.numeric(insurance_data_dummied_short$actual_change_in_price_vs_last_year_pos)
+
+#create a column which takes the value of the actual change in price if this change is strictly negative, and zero otherwise
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_neg <- insurance_data_dummied_short$actual_change_in_price_vs_last_year
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_neg[insurance_data_dummied_short$actual_change_in_price_vs_last_year_neg>=0] <- "0"
+insurance_data_dummied_short$actual_change_in_price_vs_last_year_neg <- as.numeric(insurance_data_dummied_short$actual_change_in_price_vs_last_year_neg)
+
+#run our linear regression with the interaction terms (we remove the variable of actual change in price since this data is now encompassed in our new two interaction terms)
+lin_reg_act_pric_disc <- lm(price ~ 
                   age+
                   car_value+
                   years_of_no_claims_bonus+
                   years_of_tenure_with_current_provider+
-                  actual_change_in_price_vs_last_year+
                   percent_change_in_price_vs_last_year+
-                  renewed+marital_status_d+
+                  renewed+
+                  marital_status_d+
                   marital_status_m+
                   marital_status_s+
                   marital_status_v+
                   gender_f+
                   payment_method_annual+
-                  acquisition_channel_direct,
-                data = insurance_data_dummied_short_neg_act_change_price)
-summary(lin_reg_neg_act_change_price)
-
-#keep only rows for which actual change in price is positive
-insurance_data_dummied_short_pos_act_change_price <- subset(insurance_data_dummied_short, actual_change_in_price_vs_last_year >= 0)
-
-#create a linear regression based on this subset - we only keep statistically significant variables as done previously
-lin_reg_pos_act_change_price <- lm(price ~ 
-                  age+
-                  car_value+
-                  years_of_no_claims_bonus+
-                  years_of_tenure_with_current_provider+
-                  actual_change_in_price_vs_last_year+
-                  percent_change_in_price_vs_last_year+
-                  renewed+marital_status_d+
-                  marital_status_m+
-                  marital_status_s+
-                  marital_status_v+
-                  gender_f+
-                  payment_method_annual+
-                  acquisition_channel_inbound,
-                data = insurance_data_dummied_short_pos_act_change_price)
-summary(lin_reg_pos_act_change_price)
+                  acquisition_channel_inbound+
+                  actual_change_in_price_vs_last_year_pos+
+                  actual_change_in_price_vs_last_year_neg,
+                data = insurance_data_dummied_short)
+summary(lin_reg_act_pric_disc)
 ```
-We can see that we obtain adjusted R-squared of 0.3266 and 0.3566 for respectively the "negative change in actual price" and the "positive change in actual price" datasets, compared to an adjusted R-squared of 0.3101 for the model for which we do no discrimination regarding the change in actual price vs last year.
 
-#Backtest the models
+We observe that we obtain adjusted R-squared of **0.3398** when we add two interaction terms to discriminate for the sign (<0 or >0) of the actual change in price vs. last year, vs **0.3101** when we do not.
 
-We now want to back test our models to see if disriminating based on the change in actual price indeed yields better results. We train our models on a random sample of 60% of the data, and test it on the remaining 40%.
+### 2.2.2. Backtest the models
+
+We now want to back test our models to see if disriminating based on the change in actual price indeed yields better results. We train our models on a random sample of **60%** of the data, and test it on the remaining **40%**.
+
+#### Linear regression back-testing
 
 ```{r back testing of the linear regression model, cache=TRUE}
 
@@ -453,32 +469,25 @@ colnames(lin_reg_sig_tested_vs_reality) <- c("predicted","reality")
 #compute the mean squared error and the mean absolute error
 lin_reg_sig_tested_vs_reality$squared_error <- (lin_reg_sig_tested_vs_reality$predicted - lin_reg_sig_tested_vs_reality$reality)^2
 lin_reg_sig_tested_vs_reality$absolute_error <- abs((lin_reg_sig_tested_vs_reality$predicted - lin_reg_sig_tested_vs_reality$reality))
+lin_reg_sig_tested_vs_reality$absolute_error_perc <- abs(((lin_reg_sig_tested_vs_reality$predicted - lin_reg_sig_tested_vs_reality$reality))/lin_reg_sig_tested_vs_reality$predicted)*100
 mse_lin_reg_sig = mean(lin_reg_sig_tested_vs_reality$squared_error)
 mae_lin_reg_sig = mean(lin_reg_sig_tested_vs_reality$absolute_error)
+mape_lin_reg_sig = mean(lin_reg_sig_tested_vs_reality$absolute_error_perc)
 mse_lin_reg_sig
 mae_lin_reg_sig
+mape_lin_reg_sig
 ```
 
+#### Linear regression with interaction terms back-testing
 
-
-```{r backtesting of the "positive" linear regression model, CACHE=TRUE}
-
-#define the sample size
-smp_size_2 <- floor(0.6 * nrow(insurance_data_dummied_short_neg_act_change_price))
-set.seed(456)
-train_ind_neg <- sample(seq_len(nrow(insurance_data_dummied_short_neg_act_change_price)), size = smp_size_2)
-
-#breakdown our data in a training and a testing sets
-insurance_data_dummied_short_neg_train <- insurance_data_dummied_short_neg_act_change_price[train_ind_neg, ]
-insurance_data_dummied_short_neg_test <- insurance_data_dummied_short_neg_act_change_price[-train_ind_neg, ]
+```{r back testing of the linear regression model with interaction terms, cache=TRUE}
 
 #train our model
-lin_reg_sig_neg_trained <- lm(price ~ 
+lin_reg_act_pric_disc_trained <- lm(price ~ 
                   age+
                   car_value+
                   years_of_no_claims_bonus+
                   years_of_tenure_with_current_provider+
-                  actual_change_in_price_vs_last_year+
                   percent_change_in_price_vs_last_year+
                   renewed+
                   marital_status_d+
@@ -487,85 +496,201 @@ lin_reg_sig_neg_trained <- lm(price ~
                   marital_status_v+
                   gender_f+
                   payment_method_annual+
-                  acquisition_channel_inbound,
-                data = insurance_data_dummied_short_neg_train)
-summary(lin_reg_sig_neg_trained)
+                  acquisition_channel_inbound+
+                  actual_change_in_price_vs_last_year_pos+
+                  actual_change_in_price_vs_last_year_neg,
+                data = insurance_data_dummied_short_train)
+summary(lin_reg_act_pric_disc_trained)
 
 #test our model
-lin_reg_sig_tested_neg_data <- data.frame(predict(lin_reg_sig_neg_trained, newdata = insurance_data_dummied_short_neg_test))
-lin_reg_sig_tested_neg_vs_reality <- cbind(lin_reg_sig_tested_neg_data,insurance_data_dummied_short_neg_test$price)
-colnames(lin_reg_sig_tested_neg_vs_reality) <- c("predicted","reality")
+lin_reg_act_pric_disc_tested_data <- data.frame(predict(lin_reg_act_pric_disc_trained, newdata = insurance_data_dummied_short_test))
+lin_reg_act_pric_disc_tested_vs_reality <- cbind(lin_reg_act_pric_disc_tested_data,insurance_data_dummied_short_test$price)
+colnames(lin_reg_act_pric_disc_tested_vs_reality) <- c("predicted","reality")
 
 #compute the mean squared error and the mean absolute error
-lin_reg_sig_tested_neg_vs_reality$squared_error <- (lin_reg_sig_tested_neg_vs_reality$predicted - lin_reg_sig_tested_neg_vs_reality$reality)^2
-lin_reg_sig_tested_neg_vs_reality$absolute_error <- abs(lin_reg_sig_tested_neg_vs_reality$predicted - lin_reg_sig_tested_neg_vs_reality$reality)
-mse_lin_reg_neg_sig = mean(lin_reg_sig_tested_neg_vs_reality$squared_error)
-mae_lin_reg_neg_sig = mean(lin_reg_sig_tested_neg_vs_reality$absolute_error)
-mse_lin_reg_neg_sig
-mae_lin_reg_neg_sig
+lin_reg_act_pric_disc_tested_vs_reality$squared_error <- (lin_reg_act_pric_disc_tested_vs_reality$predicted - lin_reg_act_pric_disc_tested_vs_reality$reality)^2
+lin_reg_act_pric_disc_tested_vs_reality$absolute_error <- abs((lin_reg_act_pric_disc_tested_vs_reality$predicted - lin_reg_act_pric_disc_tested_vs_reality$reality))
+lin_reg_act_pric_disc_tested_vs_reality$absolute_error_perc <- abs(((lin_reg_act_pric_disc_tested_vs_reality$predicted - lin_reg_act_pric_disc_tested_vs_reality$reality))/lin_reg_act_pric_disc_tested_vs_reality$predicted)*100
+mse_lin_reg_act_pric_disc = mean(lin_reg_act_pric_disc_tested_vs_reality$squared_error)
+mae_lin_reg_act_pric_disc = mean(lin_reg_act_pric_disc_tested_vs_reality$absolute_error)
+mape_lin_reg_act_pric_disc = mean(lin_reg_act_pric_disc_tested_vs_reality$absolute_error_perc)
+mse_lin_reg_act_pric_disc
+mae_lin_reg_act_pric_disc
+mape_lin_reg_act_pric_disc
 ```
 
-```{r backtesting of the "negative" linear regression model, CACHE=TRUE}
+### 2.2.3. Compare our models
 
-#define the sample size
-smp_size_3 <- floor(0.6 * nrow(insurance_data_dummied_short_pos_act_change_price))
-set.seed(789)
-train_ind_pos <- sample(seq_len(nrow(insurance_data_dummied_short_pos_act_change_price)), size = smp_size_3)
+Now that we backtested our linear regression models, we can compare them.
 
-#breakdown our data in a training and a testing sets
-insurance_data_dummied_short_pos_train <- insurance_data_dummied_short_pos_act_change_price[train_ind_pos, ]
-insurance_data_dummied_short_pos_test <- insurance_data_dummied_short_pos_act_change_price[-train_ind_pos, ]
+```{r comparison of linear regressions, cache=TRUE}
+#compare the 4 models we ran: the 2 linear regressions ran on the full sample and their back-tested versions
+huxreg(lin_reg_sig, lin_reg_act_pric_disc, lin_reg_sig_trained, lin_reg_act_pric_disc_trained)
 
-#train our model
-lin_reg_sig_pos_trained <- lm(price ~ 
-                  age+
+#finally, we compare the adjusted R-squared, MSE and MAE of a linear regression vs the weighted average of the linear regression which distriminate for the sign of the actual change in price vs last year
+lin_reg_r2 <- 0.3101
+lin_reg_disc_r2 <- 0.3398
+
+mse_lin_reg_sig <- format(round(unlist(as.numeric(mse_lin_reg_sig,0))), nsmall = 0)
+mse_lin_reg_act_pric_disc <- mse_lin_reg_act_pric_disc <- format(round(unlist(as.numeric(mse_lin_reg_act_pric_disc,0))), nsmall = 0)
+mae_lin_reg_sig <- mae_lin_reg_sig <- format(round(unlist(as.numeric(mae_lin_reg_sig,0))), nsmall = 0)
+mae_lin_reg_act_pric_disc <- mae_lin_reg_act_pric_disc <- format(round(unlist(as.numeric(mae_lin_reg_act_pric_disc,0))), nsmall = 0)
+mape_lin_reg_sig <- mape_lin_reg_sig <- format(round(unlist(as.numeric(mape_lin_reg_sig,0))), nsmall = 0)
+mape_lin_reg_act_pric_disc <- mape_lin_reg_act_pric_disc <- format(round(unlist(as.numeric(mape_lin_reg_act_pric_disc,0))), nsmall = 0)
+
+total_comparables <- data.frame(cbind(lin_reg_r2,lin_reg_disc_r2))
+total_comparables[nrow(total_comparables)+1,] <- cbind(mse_lin_reg_sig,mse_lin_reg_act_pric_disc)
+total_comparables[nrow(total_comparables)+1,] <- cbind(mae_lin_reg_sig,mae_lin_reg_act_pric_disc)
+total_comparables[nrow(total_comparables)+1,] <- cbind(mape_lin_reg_sig,mape_lin_reg_act_pric_disc)
+total_comparables[2,] <- prettyNum(total_comparables[2,],big.mark=",",scientific=FALSE)
+
+colnames(total_comparables) <- c("Linear regression","Linear regression based on sign of actual price change (weighted average)")
+rownames(total_comparables) <- c("Ajudsted R-Square","Mean Square Error (back tested)","Mean Absolute Error (back tested)","Mean Absolute Percentage Error (back tested)")
+
+metrics_names <- rownames(total_comparables)
+total_comparables <- cbind(metrics_names,total_comparables)
+colnames(total_comparables) <- c("Metrics","Linear regression","Linear regression disc. for actual price change")
+
+total_comparables
+```
+
+When looking at the tables, we see than regressing the price for the statistically significant variables gives us an adjusted R-squared of **0.3101**, vs **0.3398** when we use interaction terms. This is a **9.58%** improvement in the accuracy of our model.
+
+This is to be expected because, as explained above, an increase in the actual change in price vs. last year has a negative effect on price when it is negative, but a positive impact when it is positive. The overall effect is positive, but running a linear regression without interaction terms "waters down" that effect. The coefficient for the actual change in price vs last year is indeed **0.097** overall, but **0.182** when positive and **-0.058** when negative.
+
+When backtesting on **40%** of the data, we obtain a MAE and MAPE of respectively **137** and **127** without interaction terms and **34** and **30** with these terms. Interaction terms for the actual change in price therefore decreases MAE by **7.3%** and MAPE by **11.76%**.
+
+Analyzing the data to a greater extent could help coming up with more interaction terms that could improve further the predictive power of our model. 
+
+**We conclude that our linear regression model with the interaction terms is the best one.**
+
+## 4. Analyse the data and create a logistic regression model to predict the renewal rate
+
+```{r logistic regression}
+log_reg_full <- glm(formula = renewed ~ age+
+                  price+
                   car_value+
                   years_of_no_claims_bonus+
+                  annual_mileage+
                   years_of_tenure_with_current_provider+
                   actual_change_in_price_vs_last_year+
                   percent_change_in_price_vs_last_year+
-                  renewed+
                   marital_status_d+
                   marital_status_m+
                   marital_status_s+
                   marital_status_v+
                   gender_f+
+                  gender_m+
                   payment_method_annual+
+                  acquisition_channel_aggreg+
+                  acquisition_channel_direct+
                   acquisition_channel_inbound,
-                data = insurance_data_dummied_short_pos_train)
-summary(lin_reg_sig_pos_trained)
+                data = insurance_data_dummied_short)
+summary(log_reg_full)
 
-#test our model
-lin_reg_sig_tested_pos_data <- data.frame(predict(lin_reg_sig_pos_trained, newdata = insurance_data_dummied_short_pos_test))
-lin_reg_sig_tested_pos_vs_reality <- cbind(lin_reg_sig_tested_pos_data,insurance_data_dummied_short_pos_test$price)
-colnames(lin_reg_sig_tested_pos_vs_reality) <- c("predicted","reality")
-lin_reg_sig_tested_pos_vs_reality$squared_error <- (lin_reg_sig_tested_pos_vs_reality$predicted - lin_reg_sig_tested_pos_vs_reality$reality)^2
-lin_reg_sig_tested_pos_vs_reality$absolute_error <- abs(lin_reg_sig_tested_pos_vs_reality$predicted - lin_reg_sig_tested_pos_vs_reality$reality)
+predict_log_reg_full <- predict(log_reg_full, newdata = insurance_data_dummied_short, type ="response")
+predict_log_reg_full_df <- data.frame(predict_log_reg_full)
 
-#compute the mean squared error and the mean absolute error
-mse_lin_reg_pos_sig = mean(lin_reg_sig_tested_pos_vs_reality$squared_error)
-mae_lin_reg_pos_sig = mean(lin_reg_sig_tested_pos_vs_reality$absolute_error)
-mse_lin_reg_pos_sig
-mae_lin_reg_pos_sig
+renewed_from_full_sample <- data.frame(insurance_data_dummied_short$renewed)
+ROC_logreg_full <- cbind(renewed_from_full_sample,predict_log_reg_dull_df)
+colnames(ROC_logreg_full) <- c("actual_renewed","predicted_renewed")
+
+PRROC_obj <- roc.curve(scores.class0 = ROC_logreg_full$predicted_renewed, weights.class0=ROC_logreg_full$actual_renewed,
+                       curve=TRUE)
+plot(PRROC_obj)
 ```
+
+
+```{r logistic regression test}
+
+log_reg_full_trained <- glm(formula = renewed ~ age+
+                  price+
+                  car_value+
+                  years_of_no_claims_bonus+
+                  annual_mileage+
+                  years_of_tenure_with_current_provider+
+                  actual_change_in_price_vs_last_year+
+                  percent_change_in_price_vs_last_year+
+                  marital_status_d+
+                  marital_status_m+
+                  marital_status_s+
+                  marital_status_v+
+                  gender_f+
+                  gender_m+
+                  payment_method_annual+
+                  acquisition_channel_aggreg+
+                  acquisition_channel_direct+
+                  acquisition_channel_inbound,
+                data = insurance_data_dummied_short_train)
+summary(log_reg_full_trained)
+
+predict_log_reg_test <- predict(log_reg_full_trained, newdata = insurance_data_dummied_short_test, type ="response")
+predict_log_reg_test_df <- data.frame(predict_log_reg_test)
+
+renewed_from_testing_sample <- data.frame(insurance_data_dummied_short_test$renewed)
+
+ROC_logreg_test <- cbind(renewed_from_testing_sample,predict_log_reg_test_df)
+colnames(ROC_logreg_test) <- c("actual_renewed","predicted_renewed")
+
+PRROC_obj <- roc.curve(scores.class0 = ROC_logreg_test$predicted_renewed, weights.class0=ROC_logreg_test$actual_renewed,
+                       curve=TRUE)
+plot(PRROC_obj)
+```
+
 ```{r}
-huxreg(lin_reg_sig, lin_reg_neg_act_change_price, lin_reg_pos_act_change_price, lin_reg_sig_trained, lin_reg_sig_neg_trained, lin_reg_sig_pos_trained)
 
-vector_1 <- c("MSE","MAE","MAE","MSE","MAE","MSE")
-vector_2 <- c("Linear","Linear","Neg change","Neg change","Pos change","Pos change")
+youden_function <- function(x){
 
-mse_mae_comparables <- data.frame(cbind(mse_lin_reg_sig, mae_lin_reg_sig, mse_lin_reg_neg_sig, mae_lin_reg_neg_sig, mse_lin_reg_pos_sig, mae_lin_reg_pos_sig))
+      predicted <- data.frame(ifelse(predict_log_reg_full_df > x, 1, 0))
+      actual <- data.frame(insurance_data_dummied_short$renewed)
+      colnames(actual) <- c("actual")
+      colnames(predicted) <- c("predicted")
+      
+    confusion_matrix <- data.frame(table(actual$actual, predicted$predicted))
+    
+youden(confusion_matrix[4,3],confusion_matrix[3,3],confusion_matrix[1,3],confusion_matrix[2,3])
+}
 
-mse_mae_comparables <- t(mse_mae_comparables)
+ok <- youden_function(0.5)
+ok
 
-mse_mae_comparables <- cbind(mse_mae_comparables,vector_1,vector_2)
+# for(i in seq(from=0, to=0.5, by=0.05)){
+# cp <- paste(youden_function(i))
+# print(cp)
+# }
 
-rownames(mse_mae_comparables) <- c(1,2,3,4,5,6)
-colnames(mse_mae_comparables) <- c(1,2,3)
+```
+
+
+```{r}
+
+# youden_function <- function(x){
+  
+    predict_log_reg_cut_off <- data.frame(ifelse(predict_log_reg_dull_df > 0.1, 1, 0))
+    
+    
+      colnames(actual) <- c("actual")
+      colnames(predicted) <- c("predicted")
+      
+    confusion_matrix <- data.frame(table(actual$actual, predicted$predicted))
+    
+oki <- youden(confusion_matrix[4,3],confusion_matrix[3,3],confusion_matrix[1,3],confusion_matrix[2,3])
+oki
+    
+    
+# }
+
+# ok <- youden_function(0.5)
+# ok
+
+# for(i in seq(from=0, to=1, by=0.1)){
+# cp <- paste(youden_function(i))
+# print(cp)
+# }
 
 ```
 
 
 
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
