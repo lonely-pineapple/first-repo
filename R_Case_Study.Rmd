@@ -928,13 +928,13 @@ qty_act_full <- paste(qty_act_1, qty_act_2)
 
 #plot our chart showing the number of contracts sold for the prices which respectively maximize the revenue and the profit
 ggplot(forecast_3, aes(y=number_of_contracts_sold, x=change_in_price))+
-  geom_line()+
+  geom_line(size=1.25)+
   theme_bw()+
-  geom_segment(aes(x = min_price, y = qty_max_revenue, xend = price_max_revenue, yend = qty_max_revenue, colour="red"))+
-  geom_segment(aes(x = price_max_revenue, y = 0, xend = price_max_revenue, yend = qty_max_revenue, colour="red"))+
-  geom_segment(aes(x = min_price, y = qty_max_profit, xend = price_max_profit, yend = qty_max_profit, colour="blue"))+
-  geom_segment(aes(x = price_max_profit, y = 0, xend = price_max_profit, yend = qty_max_profit, colour="blue"))+
-  geom_segment(aes(x = min_price, y = next_y_contracts_sold, xend = max_price, yend = next_y_contracts_sold, colour="green"))+
+  geom_segment(aes(x = min_price, y = qty_max_revenue, xend = price_max_revenue, yend = qty_max_revenue, colour="red"), size = 1, linetype = 3)+
+  geom_segment(aes(x = price_max_revenue, y = 0, xend = price_max_revenue, yend = qty_max_revenue, colour="red"), size = 1, linetype = 3)+
+  geom_segment(aes(x = min_price, y = qty_max_profit, xend = price_max_profit, yend = qty_max_profit, colour="blue"), size = 1, linetype = 3)+
+  geom_segment(aes(x = price_max_profit, y = 0, xend = price_max_profit, yend = qty_max_profit, colour="blue"), size = 1, linetype = 3)+
+  geom_segment(aes(x = min_price, y = next_y_contracts_sold, xend = max_price, yend = next_y_contracts_sold, colour="green"), size = 1, linetype = 2)+
   scale_color_hue(labels = c(qty_prof_max_full, qty_act_full, qty_rev_max_full))+
   labs(title = c(title_no_contracts_full), y = "Number of contracts sold", x = "Change in price ('00s %)" )+
   theme(legend.title=element_blank())
